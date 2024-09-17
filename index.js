@@ -3,47 +3,28 @@ const module = (function() {
 
     var _media_items = [];
     var _media_item_values = {};
-    var _cached_thumbnails = {};
-    var _thumbnail_callbacks = {};
     var _meet_end_of_item = false;
     var _iterator;
 
-    function _prepare_media_iterator() {
+    function _prepare_media_iterator(filter) {
         if (!_iterator) {
-            return album.iterate([ "image", "video" ])
+            return album.iterate(filter)
                 .then((iterator) => {
                     _iterator = iterator;
-                
+
                     _media_items = [];
                     _media_item_values = {};
-                    _meet_end_of_item = false;     
+                    _meet_end_of_item = false;    
+                    
+                    return _media_items.length;
                 });
         } else {
-            return Promise.resolve(_iterator);
+            return Promise.resolve(_media_items.length);
         }
     }
 
-    function _load_next_media_items(count) {
-        while (count > 0 && !_meet_end_of_item) {
-            if (!_iterator.next()) {
-                _meet_end_of_item = true;
-
-                break;
-            }
-
-            const item = _iterator.info();
-
-            _update_thumbnail_url(item.id, _iterator);
-            
-            _media_items.push(item);
-            _media_item_values[item.id] = item;
-
-            count = count - 1;
-        }
-    }
-
-    function _update_recent_media_items() {
-        return album.iterate([ "image", "video" ])
+    function _update_recent_media_items(filter) {
+        return album.iterate(filter)
                 .then((iterator) => {
                     const items = [];
 
@@ -54,8 +35,6 @@ const module = (function() {
                             break;
                         }
 
-                        _update_thumbnail_url(item.id, iterator);
-
                         items.push(item);
                     }
 
@@ -65,16 +44,16 @@ const module = (function() {
                     if (items.length > 0) {
                         _media_items.unshift(...items);
                     }
-                        
-                    items.forEach((item) => {
+                    
+                    for (const item of items) {
                         _media_item_values[item.id] = item;
-                    });
+                    }
 
                     return Promise.resolve();
                 });
     }
 
-    function _get_media_items(filter, location, length) {
+    function _get_media_items(location, length) {
         const items = [];
 
         var index = location, count = length;
@@ -88,11 +67,7 @@ const module = (function() {
                 }
             }
 
-            const item = _media_items[index];
-
-            if (filter.includes(item.type)) {
-                items.push(item);
-            }
+            items.push(_media_items[index]);
 
             index = index + 1, count = count - 1;
         }
@@ -100,74 +75,81 @@ const module = (function() {
         return items;
     }
 
-    function _update_thumbnail_url(identifier, iterator) {
-        iterator.thumbnail()
-            .then((thumbnail) => {
-                const item = _media_item_values[identifier];
+    function _load_next_media_items(count) {
+        while (count > 0 && !_meet_end_of_item) {
+            if (!_iterator.next()) {
+                _meet_end_of_item = true;
 
-                item.thumbnail_url = thumbnail.url();
-                _cached_thumbnails[item.id] = thumbnail;
+                break;
+            }
 
-                if (_thumbnail_callbacks[item.id]) {
-                   const [ resolve, ] = _thumbnail_callbacks[item.id];
+            const item = _iterator.info();
 
-                   resolve(item.thumbnail_url);
+            _media_items.push(item);
+            _media_item_values[item.id] = item;
 
-                   delete _thumbnail_callbacks[item.id];
-                }
-            })
-            .catch(() => {
-                const item = _media_item_values[identifier];
-
-                item.thumbnail_url = null;
-
-                if (_thumbnail_callbacks[item.id]) {
-                    const [ , reject ] = _thumbnail_callbacks[item.id];
-
-                    reject();
-
-                    delete _thumbnail_callbacks[item.id];
-                }
-            });
+            count = count - 1;
+        }
     }
 
-    function _dispose_cached_thumbnails() {
-        Object.values(_cached_thumbnails).forEach((thumbnail) => {
-            thumbnail.dispose();
-        });
+    function _prepare_media_item(identifier) {
+        const item = _media_item_values[identifier];
 
-        _cached_thumbnails = {};
+        if (item) {
+            return _iterator.prepare(item.id);
+        } else {
+            return Promise.reject();
+        }
+    }
+
+    function _get_thumbnail_url(identifier) {
+        const item = _media_item_values[identifier];
+
+        if (item) {
+            if (item.thumbnail_url === undefined) {
+                return _iterator.thumbnail(item.id)
+                    .then((thumbnail) => {
+                        return item.thumbnail_url = thumbnail.url();
+                    })
+                    .catch(() => {
+                        return item.thumbnail_url = null;
+                    });
+            } else {
+                return Promise.resolve(item.thumbnail_url);
+            }   
+        } else {
+            return Promise.reject();
+        }
     }
 
     return {
         get_media_items: function(filter, location, length) {
-            return _prepare_media_iterator()
-                .then(() => {
-                    if (_media_items.length > 0) {
-                        return _update_recent_media_items();
+            return _prepare_media_iterator(filter)
+                .then((last_item_count) => {
+                    if (last_item_count > 0) {
+                        return _update_recent_media_items(filter);
                     } else {
                         return Promise.resolve();
                     }
                 })
                 .then(() => {
-                    return _get_media_items(filter, location, length);
+                    return _get_media_items(location, length);
                 });
         },
 
-        get_thumbnail_url: function(identifier) {
-            const item = _media_item_values[identifier];
+        prepare_media_item: function(identifier) {
+            return _prepare_media_item(identifier);
+        },
 
-            if (item.thumbnail_url !== undefined) {
-                if (item.thumbnail_url !== null) {
-                    return Promise.resolve(item.thumbnail_url);
-                } else {
-                    return Promise.reject();
-                }
-            } else {
-                return new Promise((resolve, reject) => {
-                    _thumbnail_callbacks[identifier] = [ resolve, reject ];
+        get_thumbnail_url: function(identifier) {
+            return _get_thumbnail_url(identifier)
+                .then((thumbnail_url) => {
+                    if (thumbnail_url !== null) {
+                        return thumbnail_url;
+                    } else {
+                        return Promise.reject();
+                    }
                 });
-            }
         }
     }
 })();
