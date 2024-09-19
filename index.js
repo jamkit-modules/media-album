@@ -14,8 +14,8 @@ const module = (function() {
 
                     _media_items = [];
                     _media_item_values = {};
-                    _meet_end_of_item = false;    
-                    
+                    _meet_end_of_item = false;
+
                     return _media_items.length;
                 });
         } else {
@@ -44,7 +44,7 @@ const module = (function() {
                     if (items.length > 0) {
                         _media_items.unshift(...items);
                     }
-                    
+
                     for (const item of items) {
                         _media_item_values[item.id] = item;
                     }
@@ -61,7 +61,7 @@ const module = (function() {
         while (count > 0) {
             if (index >= _media_items.length) {
                 _load_next_media_items(length);
-            
+
                 if (index >= _media_items.length) {
                     break;
                 }
@@ -116,7 +116,7 @@ const module = (function() {
                     });
             } else {
                 return Promise.resolve(item.thumbnail_url);
-            }   
+            }
         } else {
             return Promise.reject();
         }
